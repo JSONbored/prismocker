@@ -1,0 +1,72 @@
+# This file controls the behavior of Trunk: https://docs.trunk.io/cli
+# To learn more about the format of this file, see https://docs.trunk.io/reference/trunk-yaml
+version: 0.1
+cli:
+  version: 1.25.0
+
+# Repository configuration for Trunk operations
+repo:
+  trunk_branch: main  # Base branch for Trunk comparisons (used for incremental checks)
+
+# Trunk provides extensibility via plugins
+plugins:
+  sources:
+    - id: trunk
+      ref: v1.7.4
+      uri: https://github.com/trunk-io/plugins
+
+# Configure runtimes for linters
+runtimes:
+  enabled:
+    - node@22.16.0
+
+# Linter configuration
+lint:
+  enabled:
+    # Essential linters for TypeScript/JavaScript projects
+    - eslint@9.39.2
+    - prettier@3.7.4
+    - typescript@5.9.3
+    - jest  # For test linting and flaky test detection
+    - markdownlint@0.47.0
+    - sort-package-json@3.6.0
+    - actionlint@1.7.9  # GitHub Actions linting
+    - yamllint@1.37.1
+    - taplo@0.10.0  # TOML linting (for cliff.toml, etc.)
+  
+  # Default file size limit (4MB)
+  default_max_file_size: 4194304
+  
+  # Linter definitions - customize behavior
+  definitions:
+    # ESLint configuration - located in .trunk/configs/
+    - name: eslint
+      direct_configs:
+        - .trunk/configs/eslint.config.mjs
+    # Prettier configuration - located in .trunk/configs/
+    - name: prettier
+      direct_configs:
+        - .trunk/configs/prettier.json
+        - .trunk/configs/.prettierignore
+    # Jest configuration - located in .trunk/configs/
+    - name: jest
+      run_timeout: 10m  # Tests may take longer
+      direct_configs:
+        - .trunk/configs/jest.config.cjs
+    # TypeScript configuration
+    - name: typescript
+      run_timeout: 5m  # Type checking timeout
+
+# Actions (git hooks and automation)
+actions:
+  disabled:
+    - trunk-announce  # Disable announcements
+  enabled:
+    - trunk-upgrade-available  # Notify when Trunk updates available
+    # Pre-commit hooks
+    - trunk-fmt-pre-commit  # Auto-format on commit
+    # Pre-push hooks
+    - trunk-check-pre-push  # Lint check before push
+    # Note: Flaky test detection is handled via GitHub Actions workflow
+    # (uploads JUnit XML results to Trunk Flaky Tests cloud service)
+

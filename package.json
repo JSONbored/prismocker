@@ -1,0 +1,124 @@
+{
+  "name": "@jsonbored/prismocker",
+  "version": "0.1.0",
+  "description": "A type-safe, in-memory Prisma Client mock for testing. Works perfectly with pnpm and supports all Prisma operations.",
+  "keywords": [
+    "prisma",
+    "mock",
+    "testing",
+    "test",
+    "in-memory",
+    "type-safe",
+    "pnpm"
+  ],
+  "homepage": "https://github.com/JSONbored/prismocker#readme",
+  "bugs": {
+    "url": "https://github.com/JSONbored/prismocker/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JSONbored/prismocker"
+  },
+  "license": "MIT",
+  "author": "JSONbored",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./jest-helpers": {
+      "types": "./dist/jest-helpers.d.ts",
+      "import": "./dist/jest-helpers.mjs",
+      "require": "./dist/jest-helpers.cjs"
+    },
+    "./prisma-types": {
+      "types": "./dist/prisma-types.d.ts",
+      "import": "./dist/prisma-types.mjs",
+      "require": "./dist/prisma-types.cjs"
+    },
+    "./test-utils": {
+      "types": "./dist/test-utils.d.ts",
+      "import": "./dist/test-utils.mjs",
+      "require": "./dist/test-utils.cjs"
+    },
+    "./prisma-ecosystem": {
+      "types": "./dist/prisma-ecosystem.d.ts",
+      "import": "./dist/prisma-ecosystem.mjs",
+      "require": "./dist/prisma-ecosystem.cjs"
+    },
+    "./bin/generate-enums": {
+      "types": "./dist/bin/generate-enums.d.ts",
+      "import": "./dist/bin/generate-enums.mjs",
+      "require": "./dist/bin/generate-enums.js"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "prismocker": "./dist/bin/generate-enums.js",
+    "prismocker-generate-enums": "./dist/bin/generate-enums.js",
+    "prismocker-setup": "./dist/bin/setup.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsup && pnpm build:types",
+    "build:types": "tsc --declaration --outDir dist && cp src/types-augmentation.d.ts dist/types-augmentation.d.ts",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "lint": "trunk check eslint",
+    "lint:fix": "trunk check --fix eslint",
+    "format": "trunk fmt prettier",
+    "format:check": "trunk fmt --check prettier",
+    "test": "jest --config .trunk/configs/jest.config.cjs",
+    "test:coverage": "jest --coverage --config .trunk/configs/jest.config.cjs",
+    "test:watch": "jest --watch --config .trunk/configs/jest.config.cjs",
+    "type-check": "trunk check typescript",
+    "check": "trunk check",
+    "check:fix": "trunk check --fix",
+    "fmt": "trunk fmt",
+    "fmt:check": "trunk fmt --check",
+    "changelog:generate": "git-cliff --config cliff.toml --tag v$(node -p \"require('./package.json').version\")",
+    "changelog:preview": "git-cliff --config cliff.toml --tag v$(node -p \"require('./package.json').version\") --unreleased",
+    "bump:major": "tsx scripts/bump-version.ts major",
+    "bump:minor": "tsx scripts/bump-version.ts minor",
+    "bump:patch": "tsx scripts/bump-version.ts patch",
+    "analyze:commits": "tsx scripts/analyze-commits.ts",
+    "prepare": "pnpm build"
+  },
+  "devDependencies": {
+    "@jest/globals": "^30.2.0",
+    "@prisma/client": "^7.2.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^25.0.3",
+    "git-cliff": "^2.5.0",
+    "jest": "^30.2.0",
+    "jest-junit": "^16.0.0",
+    "ts-jest": "^29.4.6",
+    "tsup": "^8.5.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "@prisma/client": "^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "zod": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/JSONbored"
+  }
+}

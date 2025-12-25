@@ -1,0 +1,206 @@
+# Auto Release
+# Automatically bumps version, generates changelog, and creates release when PR is merged
+# Optimizations: conditional execution (PR merged only), batch git ops, optimized tag fetching
+#
+# **What it does:**
+# 1. Analyzes commits since last tag to determine version bump type
+# 2. Auto-bumps version in package.json
+# 3. Auto-generates changelog entry using git-cliff
+# 4. Commits version + changelog changes
+# 5. Creates and pushes tag
+# 6. Creates GitHub Release
+name: Auto Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+# Only run when PR is merged (not just closed)
+jobs:
+  auto-release:
+    # Skip if PR was closed without merging
+    if: github.event.pull_request.merged == true
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write # Required to create tags and releases
+      pull-requests: read # Required to read PR info
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 needed for git log since last tag
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Get last tag
+        id: last_tag
+        run: |
+          # Fetch tags explicitly (optimized - only tags, not full history)
+          git fetch --tags --depth=1 || true
+
+          # Get the most recent tag matching v*.*.* pattern
+          LAST_TAG=$(git describe --tags --match 'v*.*.*' --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous tag found, starting from v0.0.0"
+            echo "TAG=v0.0.0" >> $GITHUB_OUTPUT
+            echo "HAS_PREVIOUS=false" >> $GITHUB_OUTPUT
+          else
+            echo "Last tag: $LAST_TAG"
+            echo "TAG=$LAST_TAG" >> $GITHUB_OUTPUT
+            echo "HAS_PREVIOUS=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get commits since last tag
+        id: commits
+        run: |
+          if [ "${{ steps.last_tag.outputs.HAS_PREVIOUS }}" == "true" ]; then
+            # Get commits since last tag
+            COMMITS=$(git log ${{ steps.last_tag.outputs.TAG }}..HEAD --pretty=format:"%s" --no-merges)
+          else
+            # Get all commits (no previous tag)
+            COMMITS=$(git log --pretty=format:"%s" --no-merges)
+          fi
+
+          # Count commits
+          COMMIT_COUNT=$(echo "$COMMITS" | grep -c . || echo "0")
+          echo "COMMIT_COUNT=$COMMIT_COUNT" >> $GITHUB_OUTPUT
+
+          # Store commits (base64 encoded to handle special chars)
+          echo "$COMMITS" | base64 -w 0 > /tmp/commits.txt
+          echo "COMMITS_FILE=/tmp/commits.txt" >> $GITHUB_OUTPUT
+
+          # Log summary
+          echo "Found $COMMIT_COUNT commits since last tag"
+          if [ "$COMMIT_COUNT" -eq 0 ]; then
+            echo "⚠️ No commits found - skipping release"
+            echo "SKIP_RELEASE=true" >> $GITHUB_OUTPUT
+          else
+            echo "SKIP_RELEASE=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Analyze commits and determine version bump
+        id: version_bump
+        if: steps.commits.outputs.SKIP_RELEASE != 'true'
+        run: |
+          # Decode commits
+          COMMITS=$(cat ${{ steps.commits.outputs.COMMITS_FILE }} | base64 -d)
+
+          # Analyze commits using our script (pipe commits to stdin)
+          # Use head -1 to get only first line, then strip whitespace
+          BUMP_TYPE=$(echo "$COMMITS" | pnpm analyze:commits | head -1 | tr -d '[:space:]')
+
+          if [ -z "$BUMP_TYPE" ]; then
+            echo "❌ Failed to determine version bump type" >&2
+            exit 1
+          fi
+
+          echo "BUMP_TYPE=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "Determined bump type: $BUMP_TYPE"
+
+      - name: Get current version
+        id: current_version
+        if: steps.commits.outputs.SKIP_RELEASE != 'true'
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+
+      - name: Generate changelog
+        id: changelog
+        if: steps.commits.outputs.SKIP_RELEASE != 'true'
+        run: |
+          # Generate changelog entry (fail if this fails - we need changelog before bumping version)
+          pnpm changelog:generate
+
+          # Verify changelog was updated
+          if git diff --quiet CHANGELOG.md; then
+            echo "⚠️ Changelog was not updated"
+            echo "CHANGELOG_UPDATED=false" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Changelog updated"
+            echo "CHANGELOG_UPDATED=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump version
+        id: new_version
+        if: steps.commits.outputs.SKIP_RELEASE != 'true' && steps.changelog.outputs.CHANGELOG_UPDATED == 'true'
+        run: |
+          # Run bump-version and capture output
+          pnpm bump:${{ steps.version_bump.outputs.BUMP_TYPE }}
+
+          # Read new version from package.json
+          NEW_VERSION=$(node -p "require('./package.json').version")
+
+          # Validate version matches semver pattern
+          if ! echo "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: version '$NEW_VERSION' doesn't match semver pattern" >&2
+            exit 1
+          fi
+
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+
+      - name: Configure git
+        if: steps.commits.outputs.SKIP_RELEASE != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit version and changelog, then create and push tag
+        if: steps.commits.outputs.SKIP_RELEASE != 'true' && steps.changelog.outputs.CHANGELOG_UPDATED == 'true'
+        run: |
+          # Batch git operations for efficiency
+          git add package.json CHANGELOG.md
+          git commit -m "chore: bump version to ${{ steps.new_version.outputs.NEW_VERSION }}"
+
+          # Create tag before pushing
+          git tag -a "v${{ steps.new_version.outputs.NEW_VERSION }}" -m "Release v${{ steps.new_version.outputs.NEW_VERSION }}"
+
+          # Push commit and tag together (more efficient)
+          git push --force-with-lease origin main "v${{ steps.new_version.outputs.NEW_VERSION }}"
+
+          # Verify push succeeded by comparing local HEAD to origin/main
+          git fetch origin main --depth=1
+          LOCAL_HEAD=$(git rev-parse HEAD)
+          REMOTE_HEAD=$(git rev-parse origin/main)
+          if [ "$LOCAL_HEAD" != "$REMOTE_HEAD" ]; then
+            echo "❌ Git push failed: local HEAD ($LOCAL_HEAD) does not match origin/main ($REMOTE_HEAD)" >&2
+            exit 1
+          fi
+          echo "✅ Git push verified: local and remote are in sync"
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.commits.outputs.SKIP_RELEASE }}" == "true" ]; then
+            echo "## ⏭️ Release Skipped" >> $GITHUB_STEP_SUMMARY
+            echo "No commits found since last tag. Release skipped." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ✅ Release Created" >> $GITHUB_STEP_SUMMARY
+            echo "- **Version:** ${{ steps.new_version.outputs.NEW_VERSION }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Bump Type:** ${{ steps.version_bump.outputs.BUMP_TYPE }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Commits:** ${{ steps.commits.outputs.COMMIT_COUNT }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Tag:** v${{ steps.new_version.outputs.NEW_VERSION }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Changelog:** ${{ steps.changelog.outputs.CHANGELOG_UPDATED }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
